@@ -141,6 +141,246 @@
     });
   }
 
+  // ========== Tap bomb light + random flying robot ==========
+  let lastTapFxTime = 0;
+  const fxLayer = document.createElement('div');
+  fxLayer.className = 'fx-layer';
+  document.body.appendChild(fxLayer);
+
+  const tapLight = document.createElement('div');
+  tapLight.className = 'tap-light';
+  fxLayer.appendChild(tapLight);
+
+  function createTapBombEffect(x, y) {
+    const now = Date.now();
+    if (now - lastTapFxTime < 120) return;
+    lastTapFxTime = now;
+
+    tapLight.style.setProperty('--x', x + 'px');
+    tapLight.style.setProperty('--y', y + 'px');
+    tapLight.classList.remove('active');
+    void tapLight.offsetWidth;
+    tapLight.classList.add('active');
+
+    const wave = document.createElement('span');
+    wave.className = 'tap-bomb-wave';
+    wave.style.left = x + 'px';
+    wave.style.top = y + 'px';
+    fxLayer.appendChild(wave);
+
+    for (let i = 0; i < 18; i += 1) {
+      const spark = document.createElement('span');
+      spark.className = 'tap-bomb-spark';
+      spark.style.left = x + 'px';
+      spark.style.top = y + 'px';
+      spark.style.setProperty('--dx', (Math.random() * 640 - 320).toFixed(1) + 'px');
+      spark.style.setProperty('--dy', (Math.random() * 640 - 320).toFixed(1) + 'px');
+      spark.style.setProperty('--dur', (650 + Math.random() * 350).toFixed(0) + 'ms');
+      fxLayer.appendChild(spark);
+      spark.addEventListener('animationend', function () {
+        spark.remove();
+      }, { once: true });
+    }
+
+    wave.addEventListener('animationend', function () {
+      wave.remove();
+    }, { once: true });
+  }
+
+  if (window.PointerEvent) {
+    document.addEventListener('pointerdown', function (event) {
+      if (event.pointerType !== 'touch') return;
+      createTapBombEffect(event.clientX, event.clientY);
+    }, { passive: true, capture: true });
+  }
+
+  document.addEventListener('touchstart', function (event) {
+    if (!event.touches || !event.touches.length) return;
+    const touch = event.touches[0];
+    createTapBombEffect(touch.clientX, touch.clientY);
+  }, { passive: true, capture: true });
+
+  const robot = document.createElement('div');
+  robot.className = 'flying-robot';
+  robot.innerHTML = '<i class="fas fa-robot" aria-hidden="true"></i>';
+  document.body.appendChild(robot);
+
+  const robotChat = document.createElement('div');
+  robotChat.className = 'robot-chat-modal';
+  robotChat.innerHTML = [
+    '<div class="robot-chat-card" role="dialog" aria-modal="true" aria-label="Robot chat">',
+    '  <div class="robot-chat-head">',
+    '    <div class="robot-chat-title-wrap">',
+    '      <div class="robot-chat-avatar"><i class="fas fa-robot" aria-hidden="true"></i></div>',
+    '      <div>',
+    '        <h3 class="robot-chat-title">Hamed Robot</h3>',
+    '        <p class="robot-chat-status">Online</p>',
+    '      </div>',
+    '    </div>',
+    '    <button class="robot-chat-close" type="button" aria-label="Close chat">&times;</button>',
+    '  </div>',
+    '  <div class="robot-chat-body">',
+    '    <div class="robot-chat-msg robot-chat-msg-bot">',
+    '      Hello I am the robot created by Hamed Dhieb How can I help you',
+    '    </div>',
+    '  </div>',
+    '  <div class="robot-chat-input-row">',
+    '    <input type="text" class="robot-chat-input" placeholder="Type your message..." aria-label="Type your message" />',
+    '    <button type="button" class="robot-chat-send" aria-label="Send message"><i class="fas fa-paper-plane" aria-hidden="true"></i></button>',
+    '  </div>',
+    '</div>'
+  ].join('');
+  document.body.appendChild(robotChat);
+
+  const robotChatClose = robotChat.querySelector('.robot-chat-close');
+  const robotChatBody = robotChat.querySelector('.robot-chat-body');
+  const robotChatInput = robotChat.querySelector('.robot-chat-input');
+  const robotChatSend = robotChat.querySelector('.robot-chat-send');
+  let robotFlightTimer = null;
+  const robotConversation = [
+    {
+      role: 'system',
+      content: 'You are Hamed Robot, a concise helpful assistant on Hamed Dhieb portfolio website.'
+    }
+  ];
+
+  function scrollChatToBottom() {
+    if (!robotChatBody) return;
+    robotChatBody.scrollTop = robotChatBody.scrollHeight;
+  }
+
+  function addChatMessage(text, type) {
+    if (!robotChatBody || !text) return;
+    const msg = document.createElement('div');
+    msg.className = 'robot-chat-msg ' + (type === 'user' ? 'robot-chat-msg-user' : 'robot-chat-msg-bot');
+    msg.textContent = text;
+    robotChatBody.appendChild(msg);
+    scrollChatToBottom();
+  }
+
+  async function getRobotReplyFromApi() {
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: robotConversation.slice(-12)
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('API error');
+      }
+
+      const data = await response.json();
+      if (data && data.reply) return data.reply;
+      throw new Error('Invalid reply');
+    } catch (error) {
+      return 'I am having a connection issue right now. Please try again in a moment.';
+    }
+  }
+
+  async function handleSendChatMessage() {
+    if (!robotChatInput) return;
+    const text = robotChatInput.value.trim();
+    if (!text) return;
+
+    addChatMessage(text, 'user');
+    robotChatInput.value = '';
+    robotChatInput.focus();
+    robotConversation.push({ role: 'user', content: text });
+
+    if (robotChatSend) {
+      robotChatSend.disabled = true;
+    }
+    if (robotChatInput) {
+      robotChatInput.disabled = true;
+    }
+
+    addChatMessage('Typing...', 'bot');
+    const pendingMessage = robotChatBody ? robotChatBody.lastElementChild : null;
+    const reply = await getRobotReplyFromApi();
+    robotConversation.push({ role: 'assistant', content: reply });
+
+    if (pendingMessage) {
+      pendingMessage.remove();
+    }
+    addChatMessage(reply, 'bot');
+
+    if (robotChatSend) {
+      robotChatSend.disabled = false;
+    }
+    if (robotChatInput) {
+      robotChatInput.disabled = false;
+      robotChatInput.focus();
+    }
+  }
+
+  function flyRobotRandomly() {
+    const margin = 40;
+    const maxX = Math.max(margin, window.innerWidth - margin);
+    const maxY = Math.max(margin, window.innerHeight - margin);
+    const x = margin + Math.random() * (maxX - margin);
+    const y = margin + Math.random() * (maxY - margin);
+    const rot = Math.random() * 36 - 18;
+    const dur = 1600 + Math.random() * 2200;
+    const flip = Math.random() > 0.5 ? 1 : -1;
+
+    robot.style.transitionDuration = dur.toFixed(0) + 'ms';
+    robot.style.transform = 'translate(' + x.toFixed(0) + 'px, ' + y.toFixed(0) + 'px) rotate(' + rot.toFixed(1) + 'deg) scaleX(' + flip + ')';
+  }
+
+  function stopRobotFlight() {
+    if (robotFlightTimer) {
+      clearInterval(robotFlightTimer);
+      robotFlightTimer = null;
+    }
+  }
+
+  function startRobotFlight() {
+    stopRobotFlight();
+    robotFlightTimer = setInterval(flyRobotRandomly, 1800);
+  }
+
+  function openRobotChat() {
+    stopRobotFlight();
+    robotChat.classList.add('open');
+    if (robotChatInput) {
+      window.setTimeout(function () {
+        robotChatInput.focus();
+      }, 120);
+    }
+    scrollChatToBottom();
+  }
+
+  function closeRobotChat() {
+    robotChat.classList.remove('open');
+    startRobotFlight();
+  }
+
+  robot.addEventListener('click', openRobotChat);
+  robot.addEventListener('touchstart', openRobotChat, { passive: true });
+
+  if (robotChatClose) {
+    robotChatClose.addEventListener('click', closeRobotChat);
+  }
+
+  if (robotChatSend) {
+    robotChatSend.addEventListener('click', handleSendChatMessage);
+  }
+
+  if (robotChatInput) {
+    robotChatInput.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        handleSendChatMessage();
+      }
+    });
+  }
+
+  flyRobotRandomly();
+  startRobotFlight();
+
   // ========== Init ==========
   onScroll();
   window.addEventListener('scroll', onScroll, { passive: true });
